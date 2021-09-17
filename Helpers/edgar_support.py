@@ -4,7 +4,10 @@ import requests
 import re
 
 
-headers = {"User-Agent" : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"}
+def make_edgar_request(url):
+    headers = {"User-Agent" : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"}
+    edgar_request = requests.get(url, headers=headers)
+    return edgar_request
 
 
 def convert_filing_to_folder(edgar_filing_url):
@@ -15,7 +18,7 @@ def convert_filing_to_folder(edgar_filing_url):
     
     
 def retrieve_face_report_slugs(filing_summary_url):
-    filing_summary_soup = BeautifulSoup(requests.get(filing_summary_url, headers=headers).text, 'lxml')
+    filing_summary_soup = BeautifulSoup(make_edgar_request(filing_summary_url).text, 'lxml')
     reports = filing_summary_soup.find_all("report")
 
     tag_for_report_name = "shortname"
@@ -64,19 +67,21 @@ def clean_dataframe(originalFrame):
         return pd.to_numeric(frame)
 
 
-def get_clean_cash_flow(cash_flow_url):
-    edgar_request = requests.get(cash_flow_url, headers=headers)
+def get_clean_table(table_url):
+    edgar_request = make_edgar_request(table_url)
     list_of_tables = pd.read_html(edgar_request.content)
-    cash_flow_df = list_of_tables[0]
-    cash_flow_df.columns = cash_flow_df.columns.droplevel(0) 
+    table_df = list_of_tables[0]
 
-    cash_flow_df = cash_flow_df.rename(columns={cash_flow_df.columns[0]: "Captions"})
-    cash_flow_df = cash_flow_df.pipe(clean_dataframe)
-    return cash_flow_df
+    if type(table_df.columns) == pd.MultiIndex:
+        table_df.columns = table_df.columns.droplevel(0) 
+
+    table_df = table_df.rename(columns={table_df.columns[0]: "Captions"})
+    table_df = table_df.pipe(clean_dataframe)
+    return table_df
 
 
 def remove_rows_of_zeros(dataframe):
-    return dataframe.loc[ (dataframe.select_dtypes('int') != 0).all(axis=1) ]
+    return dataframe.loc[ ~(dataframe.select_dtypes('number') == 0).all(axis=1) ]
 
 
 def common_size_financial_statement(dataframe=pd.DataFrame, divisor=None):
