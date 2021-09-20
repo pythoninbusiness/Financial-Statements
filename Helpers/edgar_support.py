@@ -73,9 +73,15 @@ def get_clean_table(table_url):
     table_df = list_of_tables[0]
 
     if type(table_df.columns) == pd.MultiIndex:
+        first_level = table_df.columns.get_level_values(0)
         table_df.columns = table_df.columns.droplevel(0) 
 
+    duplicate_column_names = any(table_df.columns.duplicated())
+    if duplicate_column_names:
+        table_df.columns = first_level + "\n" + table_df.columns
+
     table_df = table_df.rename(columns={table_df.columns[0]: "Captions"})
+    table_df = table_df.dropna(thresh=len(table_df)*.1, axis=1)
     table_df = table_df.pipe(clean_dataframe)
     return table_df
 
