@@ -12,7 +12,7 @@ def make_edgar_request(url):
 
 def convert_filing_to_folder(edgar_filing_url):
     # For all SEC Filings, if you remove the last slug, you can go to the root folder 
-    base_url = "/".join( edgar_filing_url.split("/")[:-1] )
+    base_url = "/".join( edgar_filing_url.replace("ix?doc=/", "").split("/")[:-1] )
     filing_summary_url = base_url + "/FilingSummary.xml"
     return base_url, filing_summary_url
     
