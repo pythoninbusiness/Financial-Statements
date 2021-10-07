@@ -39,7 +39,9 @@ def retrieve_face_report_slugs(filing_summary_url):
     cash_flow_reports = [
         report
         for report in reports
-        if "cash flows" in report.find(tag_for_report_name).text.lower()
+        if "cash flows" in report.find(tag_for_report_name).text.lower() 
+        and
+        "parenthetical" not in report.find(tag_for_report_name).text.lower()
     ]
     assert len(cash_flow_reports) == 1, "Cash Flow ambiguous or not found"
     cash_flow_report_slug = cash_flow_reports[0].find(tag_for_file_name).text
@@ -83,8 +85,7 @@ def clean_dataframe(originalFrame):
 
 def get_clean_table(table_url):
     edgar_request = make_edgar_request(table_url)
-    list_of_tables = pd.read_html(edgar_request.content)
-    table_df = list_of_tables[0]
+    table_df = pd.read_html(edgar_request.content)[0]
 
     if type(table_df.columns) == pd.MultiIndex:
         first_level = table_df.columns.get_level_values(0)
@@ -94,9 +95,21 @@ def get_clean_table(table_url):
     if duplicate_column_names:
         table_df.columns = first_level + "\n" + table_df.columns
 
+    try:
+        table_multiple = re.findall(r"(in [A-Z][a-z]+)", table_df.columns[0])[0]
+        print(table_multiple)
+        table_multiple_map = {"in thousands": 1_000, "in millions": 1_000_000, "in billions": 1_000_000_000}
+        table_multiple = table_multiple_map[table_multiple.lower()]
+    except Exception as e:
+        print(f"Error with table multiple: {e}.")
+        print(f"Table url: {table_url}")
+
     table_df = table_df.rename(columns={table_df.columns[0]: "Captions"})
     table_df = table_df.dropna(thresh=len(table_df) * 0.1, axis=1)
     table_df = table_df.pipe(clean_dataframe)
+
+    table_df[table_df.select_dtypes("number").columns] = table_df.select_dtypes("number") * table_multiple
+
     return table_df
 
 
@@ -104,7 +117,8 @@ def remove_rows_of_zeros(dataframe):
     return dataframe.loc[~(dataframe.select_dtypes("number") == 0).all(axis=1)]
 
 
-def common_size_financial_statement(dataframe=pd.DataFrame, divisor=None):
+def common_size_financial_statement(original_dataframe=pd.DataFrame, divisor=None):
+    dataframe = original_dataframe.copy()
     numeric_dataframe = dataframe.select_dtypes("number")
     numeric_columns = numeric_dataframe.columns
 
@@ -121,3 +135,12 @@ def common_size_financial_statement(dataframe=pd.DataFrame, divisor=None):
 
     dataframe[numeric_columns] = numeric_dataframe.div(divisor)
     return dataframe
+
+
+def parse_dei_table(base_url):
+    request = make_edgar_request(base_url + "/R1.htm")
+    doc_and_entity_df = pd.read_html(request.content)[0]
+    doc_and_entity_df.columns = doc_and_entity_df.columns.droplevel(0)
+    label_column = doc_and_entity_df.columns[0]
+    doc_and_entity_df = doc_and_entity_df.set_index(label_column)
+    return doc_and_entity_df
