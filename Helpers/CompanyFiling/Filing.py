@@ -1,4 +1,5 @@
 from bs4 import BeautifulSoup
+from . import fsmetrics
 import pandas as pd
 import requests
 import re
@@ -96,10 +97,13 @@ def get_clean_table(table_url):
         table_df.columns = first_level + "\n" + table_df.columns
 
     try:
-        table_multiple = re.findall(r"(in [A-Z][a-z]+)", table_df.columns[0])[0]
+        if " in " in table_df.columns[0]:
+            table_multiple = re.findall(r"(in [A-Z][a-z]+)", table_df.columns[0])[0].lower()
+        else:
+            table_multiple = "in ones"
         print(table_multiple)
-        table_multiple_map = {"in thousands": 1_000, "in millions": 1_000_000, "in billions": 1_000_000_000}
-        table_multiple = table_multiple_map[table_multiple.lower()]
+        table_multiple_map = {"in ones": 1, "in thousands": 1_000, "in millions": 1_000_000, "in billions": 1_000_000_000}
+        table_multiple = table_multiple_map[table_multiple]
     except Exception as e:
         print(f"Error with table multiple: {e}.")
         print(f"Table url: {table_url}")
@@ -144,3 +148,107 @@ def parse_dei_table(base_url):
     label_column = doc_and_entity_df.columns[0]
     doc_and_entity_df = doc_and_entity_df.set_index(label_column)
     return doc_and_entity_df
+
+
+
+class Filing:
+
+    def __init__(self, edgar_filing_url):
+        self.base_url, self.filing_summary_url = convert_filing_to_folder(edgar_filing_url=edgar_filing_url)
+        self.get_slugs()
+        self.ticker = edgar_filing_url.split("/")[-1].split("-")[0]
+        self.period_end = edgar_filing_url.split("/")[-1].split("-")[1].replace(".htm", "")
+
+
+    def get_slugs(self):
+        self.slugs = retrieve_face_report_slugs(self.filing_summary_url)
+        self.balance_sheet_url = self.base_url + "/" + self.slugs["BS"]
+        self.income_statement_url = self.base_url + "/" + self.slugs["IS"]
+        self.cash_flow_url = self.base_url + "/" + self.slugs["CF"]
+
+
+    def get_oustanding_shares(self):
+        shares_as_of_date, shares_outstanding = fsmetrics.get_shares_outstanding(self.base_url)
+        return shares_as_of_date, shares_outstanding
+
+
+    def get_balance_sheet(self, commonsize=False):
+        if hasattr(self, "bs"):
+            bs = self.bs
+        else:
+            bs = get_clean_table(self.balance_sheet_url)
+            bs = bs.pipe(remove_rows_of_zeros)
+            self.bs = bs
+        
+        if commonsize:
+            divisor_caption = [caption for caption in bs["Captions"] if re.search(r"total", caption.lower()) and re.search(r"equity", caption.lower())][0]
+            bs = common_size_financial_statement(bs, divisor=bs.query("Captions == @divisor_caption").select_dtypes("number").iloc[0])
+                
+            styled_bs = bs.style\
+                        .background_gradient(cmap='Blues', axis=0,)\
+                        .set_properties(**{'padding': '10px'})\
+                        .format({col: '{:,.2%}'.format for col in bs.select_dtypes("number").columns })
+
+        else:
+            styled_bs = bs.style\
+                        .background_gradient(cmap='Blues', axis=0,)\
+                        .set_properties(**{'padding': '10px'})\
+                        .format({col: '{:,.0f}'.format for col in bs.select_dtypes("number").columns })
+
+        return bs, styled_bs
+
+
+    def get_income_statement(self, commonsize=False):
+        if hasattr(self, "is_"):
+            is_df = self.is_
+        else:
+            is_df = get_clean_table(self.income_statement_url)
+            is_df = is_df.query("~Captions.fillna('').str.contains('\[')") 
+            is_df = is_df.query("Captions.notnull()")
+            is_df = is_df.dropna(thresh=len(is_df)*.1, axis=1)
+            is_df = is_df.pipe(clean_dataframe)
+            is_df = is_df.pipe(remove_rows_of_zeros)
+            is_df = is_df.drop_duplicates(subset=["Captions"], keep="first")
+            self.is_ = is_df
+        
+        if commonsize:
+            is_df = common_size_financial_statement(is_df, divisor=is_df.select_dtypes("number").iloc[0])
+                
+            styled_is = is_df.style\
+                    .background_gradient(cmap='Blues', axis=0,)\
+                    .set_properties(**{'padding': '10px'})\
+                    .format({col: '{:,.2%}'.format for col in is_df.select_dtypes("number").columns })
+
+        else:
+            styled_is = is_df.style\
+                    .background_gradient(cmap='Blues', axis=0,)\
+                    .set_properties(**{'padding': '10px'})\
+                    .format({col: '{:,.0f}'.format for col in is_df.select_dtypes("number").columns })
+
+
+        return is_df, styled_is
+
+
+    def get_cash_flow(self, commonsize=False):
+        if hasattr(self, "cf"):
+            cf = self.cf
+        else:
+            cf = get_clean_table(self.cash_flow_url)
+            cf = cf.pipe(remove_rows_of_zeros)
+            self.cf = cf
+
+        if commonsize:
+            cf = common_size_financial_statement(cf, divisor=cf.select_dtypes("number").iloc[0])
+
+            styled_cf = cf.style\
+                    .background_gradient(cmap='RdBu', axis=0,)\
+                    .set_properties(**{'padding': '10px'})\
+                    .format({col: '{:,.2%}'.format for col in cf.select_dtypes("number").columns })
+
+        else:
+            styled_cf = cf.style\
+                    .background_gradient(cmap='RdBu', axis=0,)\
+                    .set_properties(**{'padding': '10px'})\
+                    .format({col: '{:,.0f}'.format for col in cf.select_dtypes("number").columns })
+
+        return cf, styled_cf
