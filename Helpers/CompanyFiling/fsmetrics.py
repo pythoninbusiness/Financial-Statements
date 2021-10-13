@@ -30,7 +30,7 @@ def book_value_per_share(balance_sheet_url, shares_outstanding):
     bs = Filing.get_clean_table(balance_sheet_url)
     bs = bs.pipe(Filing.remove_rows_of_zeros)
 
-    total_equity_regex = r"([Total]*\s*[stockholders\W*]*[shareholders\W*]*[eE]quity)$"
+    total_equity_regex = r"([Total]*\s*[stockholders\W*]*[shareholders\W*]*[eE]quity)\s*[\(\w+\)]*$"
     equity_line_item = bs[bs["Captions"].str.match(total_equity_regex)]
     if len(equity_line_item) > 1:
         total_equity = equity_line_item.iloc[0].values[1]
